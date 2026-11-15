@@ -1488,6 +1488,7 @@ local function CreateActionScreenButton(name, text, defaultPos, actionFunc)
 	return btn
 end
 
+-- Создаем экранные кнопки заранее, чтобы вкладка Combat видела их при построении
 CreateActionScreenButton("StealthBtn", "STEALTH MODE", UDim2.new(1, -175, 0, 378), function()
 	local newState = not isStealthActive
 	ToggleStealth(newState)
@@ -1507,6 +1508,17 @@ CreateActionScreenButton("BombSpamBtn", "BOMB SPAM", UDim2.new(1, -175, 0, 332),
 	Config.Combat.BombSpamActive = not Config.Combat.BombSpamActive
 	SaveConfig()
 end)
+
+-- ====================== ИНИЦИАЛИЗАЦИЯ ВКЛАДОК ======================
+pcall(BuildPlayerTab)
+pcall(BuildFlingTab)
+pcall(BuildVisualTab)
+pcall(BuildCombatTab)
+pcall(BuildFunTab)
+pcall(BuildInfoTab)
+
+Players.PlayerAdded:Connect(function() pcall(BuildFlingTab) end)
+Players.PlayerRemoving:Connect(function() pcall(BuildFlingTab) end)
 
 -- ====================== FLING (МАЯТНИК ПРОТИВ СПИД-ГЛИТЧЕРЕЙ) ======================
 local SelectedTargets = {}
