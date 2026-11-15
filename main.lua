@@ -386,61 +386,71 @@ for i, name in ipairs(TabNames) do
 	end)
 end
 
--- ====================== РОЛИ И ЦВЕТА (ИЕРАРХИЯ: ИНВЕНТАРЬ ПРИОРИТЕТНЕЕ РЕМОТА) ======================
+-- ====================== РОЛИ И ЦВЕТА (РЕМОТ + ИНВЕНТАРЬ) ======================
 local RoleCache = {}
 local LastRoleCheck = 0
+
+local function GetColorFromConfig(key)
+	local conf = Config.Colors[key]
+	if not conf then return Color3.new(1, 1, 1) end
+	if conf.rainbow then return Color3.fromHSV(tick() % 5 / 5, 1, 1) end
+	return conf.color
+end
 
 local function GetRoleColor(player)
 	local roleName = "Innocent"
 
 	pcall(function()
-		-- Обновляем кэш ремота раз в 5 секунд
-		if tick() - LastRoleCheck > 5 then
+		-- 1. Опрос ремота каждые 2 сек (чтобы знать роли за 10 сек до выдачи оружия)
+		if tick() - LastRoleCheck > 2 then
 			LastRoleCheck = tick()
 			pcall(function()
-				local ok, data = pcall(function()
-					return ReplicatedStorage.Remotes.Gameplay.GetCurrentPlayerData:InvokeServer()
-				end)
-				if ok and type(data) == "table" then
-					RoleCache = data
+				local remotes = ReplicatedStorage:FindFirstChild("Remotes")
+				local gameplay = remotes and remotes:FindFirstChild("Gameplay")
+				local getData = gameplay and gameplay:FindFirstChild("GetCurrentPlayerData")
+				if getData then
+					local ok, data = pcall(function() return getData:InvokeServer() end)
+					if ok and type(data) == "table" then
+						RoleCache = data
+					end
 				end
 			end)
 		end
 
-		-- 1. Сначала смотрим реальный инвентарь
+		-- 2. Проверка реального инвентаря (если оружие уже выдали — это точнее всего)
 		local hasKnife, hasGun = false, false
 		local char = player.Character
 		local backpack = player:FindFirstChild("Backpack")
 
-		local function check(container)
-			if not container then return end
-			for _, item in ipairs(container:GetChildren()) do
-				local nameL = item.Name:lower()
-				if item:FindFirstChild("IsKnife") or nameL:find("knife") then
-					hasKnife = true
-				end
-				if item:FindFirstChild("IsGun") or nameL:find("gun") or nameL:find("revolver") or nameL:find("sheriff") then
-					hasGun = true
+		for _, cont in ipairs({char, backpack}) do
+			if cont then
+				for _, item in ipairs(cont:GetChildren()) do
+					pcall(function()
+						local nameL = item.Name:lower()
+						if item:FindFirstChild("IsKnife") or nameL:find("knife") then hasKnife = true end
+						if item:FindFirstChild("IsGun") or nameL:find("gun") or nameL:find("revolver") or nameL:find("sheriff") then hasGun = true end
+					end)
 				end
 			end
 		end
 
-		check(char)
-		check(backpack)
-
-		-- 2. Жёсткая иерархия (инвентарь важнее ремота)
+		-- 3. Приоритет: сначала оружие в руках/рюкзаке, если его еще нет — смотрим кэш ремота
 		if hasKnife then
 			roleName = "Murder"
 		elseif hasGun then
 			roleName = "Sheriff"
-		else
-			-- Инвентарь пустой → всегда Innocent (ремот больше не перебивает)
-			roleName = "Innocent"
+		elseif RoleCache and RoleCache[player.Name] then
+			local role = tostring(RoleCache[player.Name].Role or RoleCache[player.Name].Team or ""):lower()
+			if role:find("murder") or role:find("killer") then
+				roleName = "Murder"
+			elseif role:find("sheriff") then
+				roleName = "Sheriff"
+			end
 		end
 
-		-- 3. Если игрок мёртв — тоже принудительно Innocent
+		-- 4. Если персонаж существует и мертв — сбрасываем на Innocent
 		local hum = char and char:FindFirstChildOfClass("Humanoid")
-		if not hum or hum.Health <= 0 then
+		if char and hum and hum.Health <= 0 then
 			roleName = "Innocent"
 		end
 	end)
@@ -1509,7 +1519,7 @@ CreateActionScreenButton("BombSpamBtn", "BOMB SPAM", UDim2.new(1, -175, 0, 332),
 	SaveConfig()
 end)
 
--- ====================== ИНИЦИАЛИЗАЦИЯ ВКЛАДОК ======================
+-- ====================== ИНИЦИАЛИЗАЦИЯ ВСЕХ ВКЛАДОК ======================
 pcall(BuildPlayerTab)
 pcall(BuildFlingTab)
 pcall(BuildVisualTab)
