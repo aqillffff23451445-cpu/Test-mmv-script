@@ -33,6 +33,7 @@ local Config = {
 		Chams = false,
 		Name = false,
 		Role = false,
+		Perk = false,
 		Line = false,
 		Box = false,
 		Gun = false,
@@ -395,6 +396,16 @@ local function GetColorFromConfig(key)
 	if not conf then return Color3.new(1, 1, 1) end
 	if conf.rainbow then return Color3.fromHSV(tick() % 5 / 5, 1, 1) end
 	return conf.color
+end
+
+local function GetPlayerPerk(player)
+	if RoleCache and RoleCache[player.Name] and RoleCache[player.Name].Effect then
+		local effect = tostring(RoleCache[player.Name].Effect)
+		if effect ~= "" and effect ~= "None" then
+			return effect
+		end
+	end
+	return "No Perk"
 end
 
 local function GetRoleColor(player)
@@ -909,14 +920,14 @@ local function UpdateESP()
 							hl.Adornee = char hl.FillColor = color hl.Enabled = true
 						elseif Highlights[player] then Highlights[player].Enabled = false end
 
-						if Config.ESP.Name or Config.ESP.Role then
+											if Config.ESP.Name or Config.ESP.Role or Config.ESP.Perk then
 							local bb = Billboards[player]
 							if not bb or not bb.Parent or bb.Parent ~= char then
 								if bb then pcall(function() bb:Destroy() end) end
 								bb = Instance.new("BillboardGui")
 								bb.Name = "MMV_ESP_Billboard"
-								bb.Size = UDim2.new(0, 150, 0, 42)
-								bb.StudsOffset = Vector3.new(0, 2.9, 0)
+								bb.Size = UDim2.new(0, 160, 0, 56) -- Увеличили высоту под 3 строки (Ник, Перк, Роль)
+								bb.StudsOffset = Vector3.new(0, 3.2, 0)
 								bb.AlwaysOnTop = true
 								bb.Adornee = head
 								local lbl = Instance.new("TextLabel")
@@ -930,11 +941,28 @@ local function UpdateESP()
 								bb.Parent = char
 								Billboards[player] = bb
 							end
-							local text = (Config.ESP.Name and Config.ESP.Role) and (player.Name .. "\n" .. roleName) or (Config.ESP.Name and player.Name or roleName)
+
+							-- Собираем строки по порядку: Ник -> Способность -> Роль
+							local linesList = {}
+							if Config.ESP.Name then
+								table.insert(linesList, player.Name)
+							end
+							if Config.ESP.Perk then
+								table.insert(linesList, "[" .. GetPlayerPerk(player) .. "]")
+							end
+							if Config.ESP.Role then
+								table.insert(linesList, roleName)
+							end
+
 							bb.Enabled = true
 							local lbl = bb:FindFirstChild("Label")
-							if lbl then lbl.Text = text lbl.TextColor3 = color end
-						elseif Billboards[player] then Billboards[player].Enabled = false end
+							if lbl then
+								lbl.Text = table.concat(linesList, "\n")
+								lbl.TextColor3 = color
+							end
+						elseif Billboards[player] then
+							Billboards[player].Enabled = false
+						end
 					else
 						if Highlights[player] then Highlights[player].Enabled = false end
 						if Billboards[player] then Billboards[player].Enabled = false end
