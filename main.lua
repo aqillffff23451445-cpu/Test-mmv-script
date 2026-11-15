@@ -390,60 +390,58 @@ end
 local RoleCache = {}
 local LastRoleCheck = 0
 
-local function GetColorFromConfig(key)
-	local conf = Config.Colors[key]
-	if not conf then return Color3.new(1, 1, 1) end
-	if conf.rainbow then return Color3.fromHSV(tick() % 5 / 5, 1, 1) end
-	return conf.color
-end
-
 local function GetRoleColor(player)
 	local roleName = "Innocent"
+
 	pcall(function()
-		-- Опрос ремота каждые 0.6 сек для свежих данных сервера
-		if tick() - LastRoleCheck > 0.6 then
+		-- Обновляем кэш ремота раз в 5 секунд
+		if tick() - LastRoleCheck > 5 then
 			LastRoleCheck = tick()
 			pcall(function()
-				local ok, data = pcall(function() return ReplicatedStorage.Remotes.Gameplay.GetCurrentPlayerData:InvokeServer() end)
-				if ok and type(data) == "table" then RoleCache = data end
+				local ok, data = pcall(function()
+					return ReplicatedStorage.Remotes.Gameplay.GetCurrentPlayerData:InvokeServer()
+				end)
+				if ok and type(data) == "table" then
+					RoleCache = data
+				end
 			end)
 		end
 
-		-- Шаг 1: Проверяем реальный инвентарь (персонаж + бэкпак)
+		-- 1. Сначала смотрим реальный инвентарь
 		local hasKnife, hasGun = false, false
-		local char, backpack = player.Character, player:FindFirstChild("Backpack")
-		
-		for _, cont in ipairs({char, backpack}) do
-			if cont then
-				for _, item in ipairs(cont:GetChildren()) do
-					pcall(function()
-						local nameL = item.Name:lower()
-						if item:FindFirstChild("IsKnife") or nameL:find("knife") then hasKnife = true end
-						if item:FindFirstChild("IsGun") or nameL:find("gun") or nameL:find("revolver") or nameL:find("sheriff") then hasGun = true end
-					end)
+		local char = player.Character
+		local backpack = player:FindFirstChild("Backpack")
+
+		local function check(container)
+			if not container then return end
+			for _, item in ipairs(container:GetChildren()) do
+				local nameL = item.Name:lower()
+				if item:FindFirstChild("IsKnife") or nameL:find("knife") then
+					hasKnife = true
+				end
+				if item:FindFirstChild("IsGun") or nameL:find("gun") or nameL:find("revolver") or nameL:find("sheriff") then
+					hasGun = true
 				end
 			end
 		end
 
-		-- Шаг 2: Строгая иерархия по схеме пользователя
+		check(char)
+		check(backpack)
+
+		-- 2. Жёсткая иерархия (инвентарь важнее ремота)
 		if hasKnife then
 			roleName = "Murder"
 		elseif hasGun then
 			roleName = "Sheriff"
 		else
-			-- Если в инвентаре пусто, смотрим в ремот
-			if RoleCache[player.Name] then
-				local role = tostring(RoleCache[player.Name].Role or RoleCache[player.Name].Team or ""):lower()
-				if role:find("murder") or role:find("killer") then
-					roleName = "Murder"
-				elseif role:find("sheriff") then
-					roleName = "Sheriff"
-				else
-					roleName = "Innocent"
-				end
-			else
-				roleName = "Innocent"
-			end
+			-- Инвентарь пустой → всегда Innocent (ремот больше не перебивает)
+			roleName = "Innocent"
+		end
+
+		-- 3. Если игрок мёртв — тоже принудительно Innocent
+		local hum = char and char:FindFirstChildOfClass("Humanoid")
+		if not hum or hum.Health <= 0 then
+			roleName = "Innocent"
 		end
 	end)
 
