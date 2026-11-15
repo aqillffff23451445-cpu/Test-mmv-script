@@ -1498,7 +1498,7 @@ CreateActionScreenButton("BombSpamBtn", "BOMB SPAM", UDim2.new(1, -175, 0, 332),
 	SaveConfig()
 end)
 
--- ====================== FLING (УЛУЧШЕННЫЙ + СОРТИРОВКА ПО РОЛЯМ) ======================
+-- ====================== FLING (ПЕРЕРАБОТАННЫЙ ПОД МАЯТНИК / СКВОЗЬ ЦЕЛЬ) ======================
 local SelectedTargets = {}
 local function StartFling()
 	if Config.Fling.Active then return end
@@ -1507,7 +1507,7 @@ local function StartFling()
 	for _, plr in pairs(SelectedTargets) do
 		if plr and plr.Character and plr.Character:FindFirstChild("HumanoidRootPart") then
 			targetPlayer = plr
-			break
+            break
 		end
 	end
 	if not targetPlayer then return end
@@ -1544,12 +1544,15 @@ local function StartFling()
 			local myRoot = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
 			if not tRoot or not myRoot then break end
 
-			-- Предикция движения (учитываем скорость цели со спид-глитчем)
-			local predictedPos = tRoot.Position + (tRoot.AssemblyLinearVelocity * 0.1)
-			local angle = tick() * 45
-			local offset = Vector3.new(math.sin(angle) * 1.8, 0.5, math.cos(angle) * 1.8)
+			-- Маятник / Пинг-понг по вертикальной оси сквозь тело цели
+			-- Используем синус от времени, чтобы персонаж стремительно летал то выше, то ниже цели
+			local alpha = math.sin(tick() * 35) 
+			local verticalOffset = alpha * 4.5 -- Размах маятника вверх/вниз
 			
-			myRoot.CFrame = CFrame.new(predictedPos + offset)
+			local predictedPos = tRoot.Position + (tRoot.AssemblyLinearVelocity * 0.15)
+			myRoot.CFrame = CFrame.new(predictedPos + Vector3.new(0, verticalOffset, 0))
+
+			-- Максимальная энергия (velocity), чтобы сорвать физику спид-глитчера
 			myRoot.AssemblyLinearVelocity = Vector3.new(99999, 99999, 99999)
 			myRoot.AssemblyAngularVelocity = Vector3.new(99999, 99999, 99999)
 		end
