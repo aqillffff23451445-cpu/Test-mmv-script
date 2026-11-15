@@ -1,7 +1,7 @@
 --приветик бро! Этот код без вирусов и полностью бесплатный! Пользуйся на здоровье<3
 -- ==============================================================================
 -- MMV Admin Panel | Gemini Ai Integration
--- Version 5.25.0 (Fling Prediction + Fling Role Sorting + Safe Bomb Troll Return)
+-- Version 5.26.0 (Strict Inventory/Remote Role Hierarchy + Auto 5s Refresh)
 -- ==============================================================================
 
 local getgenv = getgenv or function() return _G end
@@ -386,7 +386,7 @@ for i, name in ipairs(TabNames) do
 	end)
 end
 
--- ====================== РОЛИ И ЦВЕТА ======================
+-- ====================== РОЛИ И ЦВЕТА (ИЕРАРХИЯ: ИНВЕНТАРЬ ПРИОРИТЕТНЕЕ РЕМОТА) ======================
 local RoleCache = {}
 local LastRoleCheck = 0
 
@@ -400,6 +400,7 @@ end
 local function GetRoleColor(player)
 	local roleName = "Innocent"
 	pcall(function()
+		-- Опрос ремота каждые 0.6 сек для свежих данных сервера
 		if tick() - LastRoleCheck > 0.6 then
 			LastRoleCheck = tick()
 			pcall(function()
@@ -408,6 +409,7 @@ local function GetRoleColor(player)
 			end)
 		end
 
+		-- Шаг 1: Проверяем реальный инвентарь (персонаж + бэкпак)
 		local hasKnife, hasGun = false, false
 		local char, backpack = player.Character, player:FindFirstChild("Backpack")
 		
@@ -423,15 +425,25 @@ local function GetRoleColor(player)
 			end
 		end
 
-		if RoleCache[player.Name] then
-			local role = tostring(RoleCache[player.Name].Role or RoleCache[player.Name].Team or ""):lower()
-			if role:find("murder") or role:find("killer") then roleName = "Murder"
-			elseif role:find("sheriff") or hasGun then roleName = "Sheriff"
-			else roleName = "Innocent" end
+		-- Шаг 2: Строгая иерархия по схеме пользователя
+		if hasKnife then
+			roleName = "Murder"
+		elseif hasGun then
+			roleName = "Sheriff"
 		else
-			if hasKnife then roleName = "Murder"
-			elseif hasGun then roleName = "Sheriff"
-			else roleName = "Innocent" end
+			-- Если в инвентаре пусто, смотрим в ремот
+			if RoleCache[player.Name] then
+				local role = tostring(RoleCache[player.Name].Role or RoleCache[player.Name].Team or ""):lower()
+				if role:find("murder") or role:find("killer") then
+					roleName = "Murder"
+				elseif role:find("sheriff") then
+					roleName = "Sheriff"
+				else
+					roleName = "Innocent"
+				end
+			else
+				roleName = "Innocent"
+			end
 		end
 	end)
 
@@ -1498,7 +1510,7 @@ CreateActionScreenButton("BombSpamBtn", "BOMB SPAM", UDim2.new(1, -175, 0, 332),
 	SaveConfig()
 end)
 
--- ====================== FLING (ПЕРЕРАБОТАННЫЙ ПОД МАЯТНИК / СКВОЗЬ ЦЕЛЬ) ======================
+-- ====================== FLING (МАЯТНИК ПРОТИВ СПИД-ГЛИТЧЕРЕЙ) ======================
 local SelectedTargets = {}
 local function StartFling()
 	if Config.Fling.Active then return end
@@ -1544,15 +1556,12 @@ local function StartFling()
 			local myRoot = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
 			if not tRoot or not myRoot then break end
 
-			-- Маятник / Пинг-понг по вертикальной оси сквозь тело цели
-			-- Используем синус от времени, чтобы персонаж стремительно летал то выше, то ниже цели
 			local alpha = math.sin(tick() * 35) 
-			local verticalOffset = alpha * 4.5 -- Размах маятника вверх/вниз
+			local verticalOffset = alpha * 4.5
 			
 			local predictedPos = tRoot.Position + (tRoot.AssemblyLinearVelocity * 0.15)
 			myRoot.CFrame = CFrame.new(predictedPos + Vector3.new(0, verticalOffset, 0))
 
-			-- Максимальная энергия (velocity), чтобы сорвать физику спид-глитчера
 			myRoot.AssemblyLinearVelocity = Vector3.new(99999, 99999, 99999)
 			myRoot.AssemblyAngularVelocity = Vector3.new(99999, 99999, 99999)
 		end
@@ -1718,18 +1727,17 @@ local function BuildPlayerTab()
 	tab.CanvasSize = UDim2.new(0, 0, 0, y + 20)
 end
 
--- ====================== ВКЛАДКА FLING (С СОРТИРОВКОЙ И РОЛЯМИ) ======================
+-- ====================== ВКЛАДКА FLING (С СОРТИРОВКОЙ) ======================
 local function BuildFlingTab()
 	local tab = Tabs.Fling
 	for _, c in ipairs(tab:GetChildren()) do c:Destroy() end
 	local y = 12
 
-	-- Сортировка игроков по ролям: Murder -> Sheriff -> Innocent
 	local sortedPlayers = {}
 	for _, player in ipairs(Players:GetPlayers()) do
 		if player ~= LocalPlayer then
 			local roleName, roleColor = GetRoleColor(player)
-			local weight = 3 -- Innocent по умолчанию
+			local weight = 3
 			if roleName == "Murder" then weight = 1
 			elseif roleName == "Sheriff" then weight = 2 end
 			table.insert(sortedPlayers, {player = player, role = roleName, color = roleColor, weight = weight})
@@ -2022,7 +2030,6 @@ local function BuildFunTab()
 
 	section("---Fun Features")
 
-	-- 1. Кнопка Best Sticker (Спрей)
 	local stickerBtn = Instance.new("TextButton")
 	stickerBtn.Size = UDim2.new(1, -20, 0, 36)
 	stickerBtn.Position = UDim2.new(0, 10, 0, y)
@@ -2084,7 +2091,6 @@ local function BuildFunTab()
 	end)
 	y = y + 44
 
-	-- 2. Переключатель Murder Bomb Troll
 	Config.Fun = Config.Fun or {}
 	Config.Fun.BombTrollActive = false
 
@@ -2129,7 +2135,7 @@ local function BuildInfoTab()
 	for _, c in ipairs(tab:GetChildren()) do c:Destroy() end
 	local lbl = Instance.new("TextLabel")
 	lbl.Size = UDim2.new(1, -30, 1, -30) lbl.Position = UDim2.new(0, 15, 0, 15) lbl.BackgroundTransparency = 1
-	lbl.Text = "Mmv Script Hub\nPowered by Gemini Ai & ChatGPT\n\nVersion: 5.25.0\n\n- Fixed Fling prediction against Speed Glitch\n- Added Role indicators and Sorting in Fling Tab (Murder -> Sheriff -> Innocent)\n- Safe Return to Original Position when disabling Murder Bomb Troll\n- Full Mobile Support"
+	lbl.Text = "Mmv Script Hub\nPowered by Gemini Ai & ChatGPT\n\nVersion: 5.26.0\n\n- Strict Role Hierarchy (Inventory overrides Remote to prevent double Sheriffs)\n- Auto-refresh Fling Tab & Roles every 5 seconds\n- Fling Pendulum Fix against Speed Glitch\n- Safe Return for Murder Bomb Troll"
 	lbl.TextColor3 = Color3.fromRGB(190, 190, 190) lbl.TextSize = 15 lbl.Font = Enum.Font.GothamBold lbl.TextXAlignment = Enum.TextXAlignment.Left lbl.TextYAlignment = Enum.TextYAlignment.Top lbl.ZIndex = 4 lbl.Parent = tab
 end
 
@@ -2142,6 +2148,18 @@ BuildInfoTab()
 
 Players.PlayerAdded:Connect(BuildFlingTab)
 Players.PlayerRemoving:Connect(BuildFlingTab)
+
+-- Автообновление вкладки Fling каждые 5 секунд, если она открыта
+task.spawn(function()
+	while getgenv().MMV_AdminPanel_Session == currentSession and getgenv().MMV_AdminPanel_Running do
+		task.wait(5)
+		pcall(function()
+			if CurrentTab == "Fling" and menuVisible then
+				BuildFlingTab()
+			end
+		end)
+	end
+end)
 
 -- ====================== УМНЫЙ ГЛАВНЫЙ ЦИКЛ ======================
 local originalBombTrollPos = nil
@@ -2156,7 +2174,6 @@ RunService.RenderStepped:Connect(function()
 			local hum = char and char:FindFirstChildOfClass("Humanoid")
 			
 			if hrp and hum then
-				-- Запоминаем исходную позицию при первом включении
 				if not originalBombTrollPos then
 					originalBombTrollPos = hrp.CFrame
 				end
@@ -2187,7 +2204,6 @@ RunService.RenderStepped:Connect(function()
 			end
 		end)
 	else
-		-- Безопасный возврат на исходную точку при выключении функции
 		pcall(function()
 			local char = LocalPlayer.Character
 			local hum = char and char:FindFirstChildOfClass("Humanoid")
@@ -2268,4 +2284,4 @@ task.spawn(function()
 	ClearAllESP()
 end)
 
-print("[MMV Admin Panel] v5.25.0 успешно загружена!")
+print("[MMV Admin Panel] v5.26.0 успешно загружена!")
