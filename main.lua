@@ -387,7 +387,7 @@ for i, name in ipairs(TabNames) do
 	end)
 end
 
--- ====================== РОЛИ И ЦВЕТА (РЕМОТ + ИНВЕНТАРЬ) ======================
+-- ====================== РОЛИ И ЦВЕТА (ЛОББИ ДИСТАНЦИЯ + РЕМОТ + ИНВЕНТАРЬ) ======================
 local RoleCache = {}
 local LastRoleCheck = 0
 
@@ -408,27 +408,47 @@ local function GetPlayerPerk(player)
 	return "No Perk"
 end
 
--- Точная функция статуса строго по твоей схеме
 local function getPlayerDisplayStatus(playerData)
-	-- Если данных нет или Dead == true -> Серый цвет и статус Dead (мёртв)
-	if not playerData or playerData.Dead == true then
-		return {
-			Text = "Dead",
-			Color = Color3.fromRGB(120, 120, 120) -- Серая подсветка для мертвых
-		}
+	if not playerData then
+		return { Text = "Innocent", Color = Color3.fromRGB(120, 120, 120) }
 	end
 
-	-- Если Dead == false (игрок жив), определяем цвет по роли из ремота
+	if playerData.Dead == true then
+		return { Text = "Dead", Color = Color3.fromRGB(120, 120, 120) }
+	end
+
 	local role = playerData.Role or playerData.Team or "Innocent"
 	local roleLower = tostring(role):lower()
 	
 	if roleLower:find("murder") or roleLower:find("killer") then
-		return { Text = "Murder", Color = Config.Colors.Murder.color } -- Красный
+		return { Text = "Murder", Color = Config.Colors.Murder.color }
 	elseif roleLower:find("sheriff") then
-		return { Text = "Sheriff", Color = Config.Colors.Sheriff.color } -- Синий
+		return { Text = "Sheriff", Color = Config.Colors.Sheriff.color }
 	else
-		return { Text = "Innocent", Color = Config.Colors.Innocent.color } -- Зелёный
+		return { Text = "Innocent", Color = Config.Colors.Innocent.color }
 	end
+end
+
+-- Функция для получения центра лобби workspace.Lobby.Lobby
+local function GetLobbyCenter()
+	pcall(function()
+		local lobby = workspace:FindFirstChild("Lobby")
+		if lobby then
+			local innerLobby = lobby:FindFirstChild("Lobby")
+			if innerLobby then
+				if innerLobby:IsA("BasePart") then
+					return innerLobby.Position
+				elseif innerLobby:IsA("Model") and innerLobby.PrimaryPart then
+					return innerLobby.PrimaryPart.Position
+				else
+					-- Ищем первую попавшуюся деталь внутри лобби для координат центра
+					local part = innerLobby:FindFirstChildWhichIsA("BasePart", true)
+					if part then return part.Position end
+				end
+			end
+		end
+	end)
+	return nil
 end
 
 local function GetRoleColor(player)
@@ -436,8 +456,21 @@ local function GetRoleColor(player)
 	local isDead = false
 
 	pcall(function()
-		-- Обновляем кэш каждые 2 секунды
-		if tick() - LastRoleCheck > 2 then
+		-- 1. ЖЕСТКАЯ ПРОВЕРКА ПО ДИСТАНЦИИ ДО ЛОББИ (< 1000 стадов = в лобби / мертв)
+		local char = player.Character
+		local hrp = char and char:FindFirstChild("HumanoidRootPart")
+		if hrp then
+			local lobbyPos = GetLobbyCenter()
+			if lobbyPos then
+				local distToLobby = (hrp.Position - lobbyPos).Magnitude
+				if distToLobby < 1000 then
+					isDead = true
+				end
+			end
+		end
+
+		-- Обновление данных с сервера каждые 2 секунды (если игрок на карте)
+		if not isDead and (tick() - LastRoleCheck > 2) then
 			LastRoleCheck = tick()
 			pcall(function()
 				local remotes = ReplicatedStorage:FindFirstChild("Remotes")
@@ -456,26 +489,11 @@ local function GetRoleColor(player)
 			end)
 		end
 
-		local playerData = RoleCache and RoleCache[player.Name]
-
-		-- 1. Сначала проверяем смерть по серверу
-		if playerData and playerData.Dead == true then
+		if RoleCache and RoleCache[player.Name] and RoleCache[player.Name].Dead == true then
 			isDead = true
 		end
 
-		-- 2. Дополнительная проверка через Humanoid
-		local char = player.Character
-		local hum = char and char:FindFirstChildOfClass("Humanoid")
-		if char and hum and hum.Health <= 0 then
-			isDead = true
-		end
-
-		if isDead then
-			roleName = "Innocent"
-			return
-		end
-
-		-- 3. Проверка инвентаря (реальные предметы)
+		-- Проверка инвентаря (если игрок на карте и держит оружие)
 		local hasKnife, hasGun = false, false
 		local backpack = player:FindFirstChild("Backpack")
 
@@ -495,14 +513,21 @@ local function GetRoleColor(player)
 			end
 		end
 
-		-- 4. Приоритет
-		if hasKnife then
+		local hum = char and char:FindFirstChildOfClass("Humanoid")
+		if char and hum and hum.Health <= 0 then
+			isDead = true
+		end
+
+		-- Распределение ролей
+		if isDead then
+			roleName = "Innocent"
+		elseif hasKnife then
 			roleName = "Murder"
 		elseif hasGun then
 			roleName = "Sheriff"
-		elseif playerData then
-			local role = tostring(playerData.Role or ""):lower()
-			if role:find("murder") then
+		elseif RoleCache and RoleCache[player.Name] then
+			local role = tostring(RoleCache[player.Name].Role or RoleCache[player.Name].Team or ""):lower()
+			if role:find("murder") or role:find("killer") then
 				roleName = "Murder"
 			elseif role:find("sheriff") then
 				roleName = "Sheriff"
