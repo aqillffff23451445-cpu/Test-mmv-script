@@ -387,7 +387,7 @@ for i, name in ipairs(TabNames) do
 	end)
 end
 
--- ====================== РОЛИ И ЦВЕТА (ЛОББИ ДИСТАНЦИЯ + РЕМОТ + ИНВЕНТАРЬ) ======================
+-- ====================== РОЛИ И ЦВЕТА (ТОЧНЫЕ КООРДИНАТЫ ЛОББИ + ИНВЕНТАРЬ) ======================
 local RoleCache = {}
 local LastRoleCheck = 0
 
@@ -410,7 +410,7 @@ end
 
 local function getPlayerDisplayStatus(playerData)
 	if not playerData then
-		return { Text = "Innocent", Color = Color3.fromRGB(120, 120, 120) }
+		return { Text = "Innocent", Color = Config.Colors.Innocent.color }
 	end
 
 	if playerData.Dead == true then
@@ -429,47 +429,26 @@ local function getPlayerDisplayStatus(playerData)
 	end
 end
 
--- Функция для получения центра лобби workspace.Lobby.Lobby
-local function GetLobbyCenter()
-	pcall(function()
-		local lobby = workspace:FindFirstChild("Lobby")
-		if lobby then
-			local innerLobby = lobby:FindFirstChild("Lobby")
-			if innerLobby then
-				if innerLobby:IsA("BasePart") then
-					return innerLobby.Position
-				elseif innerLobby:IsA("Model") and innerLobby.PrimaryPart then
-					return innerLobby.PrimaryPart.Position
-				else
-					-- Ищем первую попавшуюся деталь внутри лобби для координат центра
-					local part = innerLobby:FindFirstChildWhichIsA("BasePart", true)
-					if part then return part.Position end
-				end
-			end
-		end
-	end)
-	return nil
-end
+-- Жестко заданный центр лобби из твоего F3X (-0.28, 205.25, -12.69)
+local LOBBY_CENTER = Vector3.new(-0.28, 205.25, -12.69)
 
 local function GetRoleColor(player)
 	local roleName = "Innocent"
 	local isDead = false
 
 	pcall(function()
-		-- 1. ЖЕСТКАЯ ПРОВЕРКА ПО ДИСТАНЦИИ ДО ЛОББИ (< 1000 стадов = в лобби / мертв)
 		local char = player.Character
 		local hrp = char and char:FindFirstChild("HumanoidRootPart")
+		
 		if hrp then
-			local lobbyPos = GetLobbyCenter()
-			if lobbyPos then
-				local distToLobby = (hrp.Position - lobbyPos).Magnitude
-				if distToLobby < 1000 then
-					isDead = true
-				end
+			-- Проверяем дистанцию до точного центра лобби
+			local distToLobby = (hrp.Position - LOBBY_CENTER).Magnitude
+			if distToLobby < 1000 then
+				isDead = true -- Все, кто в лобби ближе 1000 стадов, считаются мертвыми/не в игре
 			end
 		end
 
-		-- Обновление данных с сервера каждые 2 секунды (если игрок на карте)
+		-- Если игрок на карте (далеко от лобби), запрашиваем данные с сервера каждые 2 секунды
 		if not isDead and (tick() - LastRoleCheck > 2) then
 			LastRoleCheck = tick()
 			pcall(function()
@@ -493,7 +472,7 @@ local function GetRoleColor(player)
 			isDead = true
 		end
 
-		-- Проверка инвентаря (если игрок на карте и держит оружие)
+		-- Проверка инвентаря на самой карте
 		local hasKnife, hasGun = false, false
 		local backpack = player:FindFirstChild("Backpack")
 
@@ -518,7 +497,7 @@ local function GetRoleColor(player)
 			isDead = true
 		end
 
-		-- Распределение ролей
+		-- Распределение ролей для боевых функций
 		if isDead then
 			roleName = "Innocent"
 		elseif hasKnife then
@@ -535,6 +514,7 @@ local function GetRoleColor(player)
 		end
 	end)
 
+	-- Для ESP и визуала: если в лобби (< 1000 стадов) или мертв -> возвращаем серый цвет
 	if isDead then
 		return "Dead", Color3.fromRGB(120, 120, 120)
 	end
