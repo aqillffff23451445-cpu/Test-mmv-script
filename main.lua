@@ -1,7 +1,7 @@
 --приветик бро! Этот код без вирусов и полностью бесплатный! Пользуйся на здоровье<3
 -- ==============================================================================
 -- MMV Admin Panel | Gemini Ai Integration
--- Version 5.26.2 (Strict Inventory/Remote Role Hierarchy + Schema Status Fix)
+-- Version 5.26.3 (Strict Schema Status Fix)
 -- ==============================================================================
 
 local getgenv = getgenv or function() return _G end
@@ -408,13 +408,14 @@ local function GetPlayerPerk(player)
 	return "No Perk"
 end
 
--- Точная функция статуса по твоей схеме
+-- Точная функция статуса строго по схеме (если нет данных или мертв -> Dead + серый, иначе роль + свой цвет)
 local function getPlayerDisplayStatus(playerData)
-	if not playerData or playerData.Dead == true then
-		return {
-			Text = "Dead",
-			Color = Color3.fromRGB(120, 120, 120) -- Серая подсветка для мертвых/лобби
-		}
+	if not playerData then
+		return { Text = "Innocent", Color = Config.Colors.Innocent.color }
+	end
+
+	if playerData.Dead == true then
+		return { Text = "Dead", Color = Color3.fromRGB(120, 120, 120) }
 	end
 
 	local role = playerData.Role or playerData.Team or "Innocent"
@@ -2228,7 +2229,7 @@ local function BuildInfoTab()
 	for _, c in ipairs(tab:GetChildren()) do c:Destroy() end
 	local lbl = Instance.new("TextLabel")
 	lbl.Size = UDim2.new(1, -30, 1, -30) lbl.Position = UDim2.new(0, 15, 0, 15) lbl.BackgroundTransparency = 1
-	lbl.Text = "Mmv Script Hub\nPowered by Gemini Ai & ChatGPT\n\nVersion: 5.26.2\n\n- Strict Role Hierarchy (Inventory overrides Remote to prevent double Sheriffs)\n- Auto-refresh Fling Tab & Roles every 5 seconds\n- Fling Pendulum Fix against Speed Glitch\n- Safe Return for Murder Bomb Troll"
+	lbl.Text = "Mmv Script Hub\nPowered by Gemini Ai & ChatGPT\n\nVersion: 5.26.3\n\n- Strict Role Hierarchy (Inventory overrides Remote to prevent double Sheriffs)\n- Auto-refresh Fling Tab & Roles every 5 seconds\n- Fling Pendulum Fix against Speed Glitch\n- Safe Return for Murder Bomb Troll"
 	lbl.TextColor3 = Color3.fromRGB(190, 190, 190) lbl.TextSize = 15 lbl.Font = Enum.Font.GothamBold lbl.TextXAlignment = Enum.TextXAlignment.Left lbl.TextYAlignment = Enum.TextYAlignment.Top lbl.ZIndex = 4 lbl.Parent = tab
 end
 
@@ -2332,7 +2333,7 @@ task.spawn(function()
 			if Config.Combat.BombSpamActive then pcall(TriggerBombSpam) end
 			if Config.AntiCauldron.Enabled then pcall(ProcessCauldrons) end
 			
-					pcall(function()
+			pcall(function()
 				if Config.Fun and Config.Fun.BombTrollActive then
 					local char = LocalPlayer.Character
 					local hrp = char and char:FindFirstChild("HumanoidRootPart")
@@ -2377,4 +2378,4 @@ task.spawn(function()
 	ClearAllESP()
 end)
 
-print("[MMV Admin Panel] v5.26.2 успешно загружена!")
+print("[MMV Admin Panel] v5.26.3 успешно загружена!")
