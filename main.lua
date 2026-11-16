@@ -1891,7 +1891,7 @@ local function BuildVisualTab()
 	y = y + 44
 
 	section("---Esp")
-	local opts = {{n = "Chams esp", k = "Chams"}, {n = "Name esp", k = "Name"}, {n = "Role esp", k = "Role"}, {n = "Line esp", k = "Line"}, {n = "Box esp", k = "Box"}, {n = "Gun esp", k = "Gun"}, {n = "Trap esp", k = "Trap"}}
+	local opts = {{n = "Chams esp", k = "Chams"}, {n = "Name esp", k = "Name"}, {n = "Role esp", k = "Role"}, {n = "Perk esp", k = "Perk"}, {n = "Line esp", k = "Line"}, {n = "Box esp", k = "Box"}, {n = "Gun esp", k = "Gun"}, {n = "Trap esp", k = "Trap"}}
 	for _, o in ipairs(opts) do
 		local btn = Instance.new("TextButton")
 		btn.Size = UDim2.new(1, -20, 0, 34) btn.Position = UDim2.new(0, 10, 0, y)
