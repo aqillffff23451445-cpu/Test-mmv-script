@@ -1,7 +1,7 @@
 --приветик бро! Этот код без вирусов и полностью бесплатный! Пользуйся на здоровье<3
 -- ==============================================================================
 -- MMV Admin Panel | Gemini Ai Integration
--- Version 5.26.0 (Strict Inventory/Remote Role Hierarchy + Auto 5s Refresh)
+-- Version 5.26.1 (Strict Inventory/Remote Role Hierarchy + Status Fix)
 -- ==============================================================================
 
 local getgenv = getgenv or function() return _G end
@@ -429,11 +429,11 @@ local function getPlayerDisplayStatus(playerData)
 		local roleColor = Color3.fromRGB(255, 255, 255)
 		
 		if role == "Murder" then
-			roleColor = Config.Colors.Murder.color -- Красный (из конфига)
+			roleColor = Config.Colors.Murder.color
 		elseif role == "Sheriff" then
-			roleColor = Config.Colors.Sheriff.color -- Синий (из конфига)
+			roleColor = Config.Colors.Sheriff.color
 		else
-			roleColor = Config.Colors.Innocent.color -- Зеленый (из конфига)
+			roleColor = Config.Colors.Innocent.color
 		end
 		
 		return {
@@ -442,7 +442,6 @@ local function getPlayerDisplayStatus(playerData)
 		}
 	end
 end
-
 
 local function GetRoleColor(player)
 	local roleName = "Innocent"
@@ -941,7 +940,10 @@ local function UpdateESP()
 					ProcessHubUserTag(player, head)
 
 					if Config.ESP.Enabled then
-						local roleName, color = GetRoleColor(player)
+						local pData = RoleCache and RoleCache[player.Name]
+						local status = getPlayerDisplayStatus(pData)
+						local color = status.Color
+
 						if Config.ESP.Chams then
 							local hl = Highlights[player]
 							if not hl or not hl.Parent or hl.Parent ~= char then
@@ -979,10 +981,6 @@ local function UpdateESP()
 								Billboards[player] = bb
 							end
 
-							-- ИСПОЛЬЗУЕМ НАШУ ФУНКЦИЮ СТАТУСА ТУТ:
-							local pData = RoleCache and RoleCache[player.Name]
-							local status = getPlayerDisplayStatus(pData)
-
 							local linesList = {}
 							if Config.ESP.Name then
 								table.insert(linesList, player.Name)
@@ -991,20 +989,19 @@ local function UpdateESP()
 								table.insert(linesList, "[" .. GetPlayerPerk(player) .. "]")
 							end
 							if Config.ESP.Role then
-								table.insert(linesList, status.Text) -- Здесь выведется роль или "Dead"
+								table.insert(linesList, status.Text)
 							end
 
 							bb.Enabled = true
 							local lbl = bb:FindFirstChild("Label")
 							if lbl then
 								lbl.Text = table.concat(linesList, "\n")
-								lbl.TextColor3 = status.Color -- Цвет автоматически станет серым, если мертв
+								lbl.TextColor3 = status.Color
 							end
 						elseif Billboards[player] then
 							Billboards[player].Enabled = false
 						end
 					else
-
 						if Highlights[player] then Highlights[player].Enabled = false end
 						if Billboards[player] then Billboards[player].Enabled = false end
 					end
@@ -1135,8 +1132,12 @@ if HasDrawing then
 						local root = char.HumanoidRootPart 
 						local hum = char:FindFirstChildOfClass("Humanoid")
 						
-						if hum and hum.Health > 0 then
-							local _, color = GetRoleColor(player)
+						if hum then
+							-- ИСПОЛЬЗУЕМ НАШУ ФУНКЦИЮ СТАТУСА ДЛЯ ЛИНИЙ И БОКСОВ:
+							local pData = RoleCache and RoleCache[player.Name]
+							local status = getPlayerDisplayStatus(pData)
+							local color = status.Color
+							
 							local rootPos, onScreen = Camera:WorldToViewportPoint(root.Position)
 							
 							if onScreen and rootPos.Z > 0 then
@@ -1567,7 +1568,6 @@ local function CreateActionScreenButton(name, text, defaultPos, actionFunc)
 	return btn
 end
 
--- Создаем экранные кнопки заранее, чтобы вкладка Combat видела их при построении
 CreateActionScreenButton("StealthBtn", "STEALTH MODE", UDim2.new(1, -175, 0, 378), function()
 	local newState = not isStealthActive
 	ToggleStealth(newState)
@@ -1840,7 +1840,6 @@ local function BuildFlingTab()
 	for _, data in ipairs(sortedPlayers) do
 		local player = data.player
 		
-		-- Получаем актуальные данные из кэша ролей/сервера
 		local pData = RoleCache and RoleCache[player.Name]
 		local status = getPlayerDisplayStatus(pData)
 
@@ -1850,7 +1849,6 @@ local function BuildFlingTab()
 		btn.Position = UDim2.new(0, 10, 0, y)
 		btn.BackgroundColor3 = SelectedTargets[player] and Color3.fromRGB(30, 70, 45) or Color3.fromRGB(52, 52, 52)
 		
-		-- ЕСЛИ ИГРОК В ЛОББИ ИЛИ МЕРТВ, ПИШЕМ СЕРЫМ ТЕКСТОМ:
 		btn.Text = "  " .. player.Name .. " [" .. status.Text .. "]" 
 		btn.TextColor3 = status.Color 
 		btn.TextSize = 14 
@@ -2249,7 +2247,7 @@ local function BuildInfoTab()
 	for _, c in ipairs(tab:GetChildren()) do c:Destroy() end
 	local lbl = Instance.new("TextLabel")
 	lbl.Size = UDim2.new(1, -30, 1, -30) lbl.Position = UDim2.new(0, 15, 0, 15) lbl.BackgroundTransparency = 1
-	lbl.Text = "Mmv Script Hub\nPowered by Gemini Ai & ChatGPT\n\nVersion: 5.26.0\n\n- Strict Role Hierarchy (Inventory overrides Remote to prevent double Sheriffs)\n- Auto-refresh Fling Tab & Roles every 5 seconds\n- Fling Pendulum Fix against Speed Glitch\n- Safe Return for Murder Bomb Troll"
+	lbl.Text = "Mmv Script Hub\nPowered by Gemini Ai & ChatGPT\n\nVersion: 5.26.1\n\n- Strict Role Hierarchy (Inventory overrides Remote to prevent double Sheriffs)\n- Auto-refresh Fling Tab & Roles every 5 seconds\n- Fling Pendulum Fix against Speed Glitch\n- Safe Return for Murder Bomb Troll"
 	lbl.TextColor3 = Color3.fromRGB(190, 190, 190) lbl.TextSize = 15 lbl.Font = Enum.Font.GothamBold lbl.TextXAlignment = Enum.TextXAlignment.Left lbl.TextYAlignment = Enum.TextYAlignment.Top lbl.ZIndex = 4 lbl.Parent = tab
 end
 
@@ -2398,4 +2396,4 @@ task.spawn(function()
 	ClearAllESP()
 end)
 
-print("[MMV Admin Panel] v5.26.0 успешно загружена!")
+print("[MMV Admin Panel] v5.26.1 успешно загружена!")
