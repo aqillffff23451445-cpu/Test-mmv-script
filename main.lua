@@ -408,6 +408,42 @@ local function GetPlayerPerk(player)
 	return "No Perk"
 end
 
+-- Функция для получения статуса игрока для ESP и вкладки Fling
+local function getPlayerDisplayStatus(playerData)
+	if not playerData then
+		return {
+			Text = "In Lobby",
+			Color = Color3.fromRGB(150, 150, 150) -- Серый цвет для лобби
+		}
+	end
+
+	-- Если игрок мертв (Dead = true)
+	if playerData.Dead == true then
+		return {
+			Text = "Dead",
+			Color = Color3.fromRGB(120, 120, 120) -- Серый цвет для мертвых
+		}
+	else
+		-- Если живой, возвращаем его роль
+		local role = playerData.Role or "Innocent"
+		local roleColor = Color3.fromRGB(255, 255, 255)
+		
+		if role == "Murder" then
+			roleColor = Config.Colors.Murder.color -- Красный (из конфига)
+		elseif role == "Sheriff" then
+			roleColor = Config.Colors.Sheriff.color -- Синий (из конфига)
+		else
+			roleColor = Config.Colors.Innocent.color -- Зеленый (из конфига)
+		end
+		
+		return {
+			Text = role,
+			Color = roleColor
+		}
+	end
+end
+
+
 local function GetRoleColor(player)
 	local roleName = "Innocent"
 
@@ -901,7 +937,6 @@ local function UpdateESP()
 				local root = char:FindFirstChild("HumanoidRootPart")
 				local head = char:FindFirstChild("Head") or root
 				local hum = char:FindFirstChildOfClass("Humanoid")
-
 				if root and hum and hum.Health > 0 then
 					ProcessHubUserTag(player, head)
 
@@ -918,15 +953,17 @@ local function UpdateESP()
 								Highlights[player] = hl
 							end
 							hl.Adornee = char hl.FillColor = color hl.Enabled = true
-						elseif Highlights[player] then Highlights[player].Enabled = false end
+						elseif Highlights[player] then 
+							Highlights[player].Enabled = false 
+						end
 
-											if Config.ESP.Name or Config.ESP.Role or Config.ESP.Perk then
+						if Config.ESP.Name or Config.ESP.Role or Config.ESP.Perk then
 							local bb = Billboards[player]
 							if not bb or not bb.Parent or bb.Parent ~= char then
 								if bb then pcall(function() bb:Destroy() end) end
 								bb = Instance.new("BillboardGui")
 								bb.Name = "MMV_ESP_Billboard"
-								bb.Size = UDim2.new(0, 160, 0, 56) -- Увеличили высоту под 3 строки (Ник, Перк, Роль)
+								bb.Size = UDim2.new(0, 160, 0, 56)
 								bb.StudsOffset = Vector3.new(0, 3.2, 0)
 								bb.AlwaysOnTop = true
 								bb.Adornee = head
@@ -942,7 +979,10 @@ local function UpdateESP()
 								Billboards[player] = bb
 							end
 
-							-- Собираем строки по порядку: Ник -> Способность -> Роль
+							-- ИСПОЛЬЗУЕМ НАШУ ФУНКЦИЮ СТАТУСА ТУТ:
+							local pData = RoleCache and RoleCache[player.Name]
+							local status = getPlayerDisplayStatus(pData)
+
 							local linesList = {}
 							if Config.ESP.Name then
 								table.insert(linesList, player.Name)
@@ -951,19 +991,20 @@ local function UpdateESP()
 								table.insert(linesList, "[" .. GetPlayerPerk(player) .. "]")
 							end
 							if Config.ESP.Role then
-								table.insert(linesList, roleName)
+								table.insert(linesList, status.Text) -- Здесь выведется роль или "Dead"
 							end
 
 							bb.Enabled = true
 							local lbl = bb:FindFirstChild("Label")
 							if lbl then
 								lbl.Text = table.concat(linesList, "\n")
-								lbl.TextColor3 = color
+								lbl.TextColor3 = status.Color -- Цвет автоматически станет серым, если мертв
 							end
 						elseif Billboards[player] then
 							Billboards[player].Enabled = false
 						end
 					else
+
 						if Highlights[player] then Highlights[player].Enabled = false end
 						if Billboards[player] then Billboards[player].Enabled = false end
 					end
@@ -1798,21 +1839,46 @@ local function BuildFlingTab()
 
 	for _, data in ipairs(sortedPlayers) do
 		local player = data.player
+		
+		-- Получаем актуальные данные из кэша ролей/сервера
+		local pData = RoleCache and RoleCache[player.Name]
+		local status = getPlayerDisplayStatus(pData)
+
 		local btn = Instance.new("TextButton")
-		btn.Name = player.Name btn.Size = UDim2.new(1, -20, 0, 34) btn.Position = UDim2.new(0, 10, 0, y)
+		btn.Name = player.Name 
+		btn.Size = UDim2.new(1, -20, 0, 34) 
+		btn.Position = UDim2.new(0, 10, 0, y)
 		btn.BackgroundColor3 = SelectedTargets[player] and Color3.fromRGB(30, 70, 45) or Color3.fromRGB(52, 52, 52)
-		btn.Text = "  " .. player.Name .. " [" .. data.role .. "]" 
-		btn.TextColor3 = data.color 
-		btn.TextSize = 14 btn.Font = Enum.Font.GothamBold btn.TextXAlignment = Enum.TextXAlignment.Left btn.ZIndex = 4 btn.Parent = tab
+		
+		-- ЕСЛИ ИГРОК В ЛОББИ ИЛИ МЕРТВ, ПИШЕМ СЕРЫМ ТЕКСТОМ:
+		btn.Text = "  " .. player.Name .. " [" .. status.Text .. "]" 
+		btn.TextColor3 = status.Color 
+		btn.TextSize = 14 
+		btn.Font = Enum.Font.GothamBold 
+		btn.TextXAlignment = Enum.TextXAlignment.Left 
+		btn.ZIndex = 4 
+		btn.Parent = tab
+		
 		Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 6)
 
 		local sel = Instance.new("TextLabel")
-		sel.Size = UDim2.new(0, 90, 1, 0) sel.Position = UDim2.new(1, -95, 0, 0) sel.BackgroundTransparency = 1
-		sel.Text = SelectedTargets[player] and "SELECT" or "" sel.TextColor3 = Color3.fromRGB(0, 255, 120)
-		sel.TextSize = 14 sel.Font = Enum.Font.GothamBold sel.TextXAlignment = Enum.TextXAlignment.Right sel.ZIndex = 5 sel.Parent = btn
+		sel.Size = UDim2.new(0, 90, 1, 0) 
+		sel.Position = UDim2.new(1, -95, 0, 0) 
+		sel.BackgroundTransparency = 1
+		sel.Text = SelectedTargets[player] and "SELECT" or "" 
+		sel.TextColor3 = Color3.fromRGB(0, 255, 120)
+		sel.TextSize = 14 
+		sel.Font = Enum.Font.GothamBold 
+		sel.TextXAlignment = Enum.TextXAlignment.Right 
+		sel.ZIndex = 5 
+		sel.Parent = btn
 
 		btn.MouseButton1Click:Connect(function()
-			if SelectedTargets[player] then SelectedTargets = {} else SelectedTargets = {[player] = player} end
+			if SelectedTargets[player] then 
+				SelectedTargets = {} 
+			else 
+				SelectedTargets = {[player] = player} 
+			end
 			BuildFlingTab()
 		end)
 		y = y + 40
