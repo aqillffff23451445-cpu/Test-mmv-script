@@ -1,7 +1,7 @@
 --приветик бро! Этот код без вирусов и полностью бесплатный! Пользуйся на здоровье<3
 -- ==============================================================================
 -- MMV Admin Panel | Gemini Ai Integration
--- Version 5.26.1 (Strict Inventory/Remote Role Hierarchy + Status Fix)
+-- Version 5.26.2 (Strict Inventory/Remote Role Hierarchy + Schema Status Fix)
 -- ==============================================================================
 
 local getgenv = getgenv or function() return _G end
@@ -408,38 +408,24 @@ local function GetPlayerPerk(player)
 	return "No Perk"
 end
 
--- Функция для получения статуса игрока для ESP и вкладки Fling
+-- Точная функция статуса по твоей схеме
 local function getPlayerDisplayStatus(playerData)
-	if not playerData then
+	if not playerData or playerData.Dead == true then
 		return {
-			Text = "In Lobby",
-			Color = Color3.fromRGB(150, 150, 150) -- Серый цвет для лобби
+			Text = "Dead",
+			Color = Color3.fromRGB(120, 120, 120) -- Серая подсветка для мертвых/лобби
 		}
 	end
 
-	-- Если игрок мертв (Dead = true)
-	if playerData.Dead == true then
-		return {
-			Text = "Dead",
-			Color = Color3.fromRGB(120, 120, 120) -- Серый цвет для мертвых
-		}
+	local role = playerData.Role or playerData.Team or "Innocent"
+	local roleLower = tostring(role):lower()
+	
+	if roleLower:find("murder") or roleLower:find("killer") then
+		return { Text = "Murder", Color = Config.Colors.Murder.color }
+	elseif roleLower:find("sheriff") then
+		return { Text = "Sheriff", Color = Config.Colors.Sheriff.color }
 	else
-		-- Если живой, возвращаем его роль
-		local role = playerData.Role or "Innocent"
-		local roleColor = Color3.fromRGB(255, 255, 255)
-		
-		if role == "Murder" then
-			roleColor = Config.Colors.Murder.color
-		elseif role == "Sheriff" then
-			roleColor = Config.Colors.Sheriff.color
-		else
-			roleColor = Config.Colors.Innocent.color
-		end
-		
-		return {
-			Text = role,
-			Color = roleColor
-		}
+		return { Text = "Innocent", Color = Config.Colors.Innocent.color }
 	end
 end
 
@@ -447,7 +433,6 @@ local function GetRoleColor(player)
 	local roleName = "Innocent"
 
 	pcall(function()
-		-- 1. Опрос ремота каждые 2 сек (чтобы знать роли за 10 сек до выдачи оружия)
 		if tick() - LastRoleCheck > 2 then
 			LastRoleCheck = tick()
 			pcall(function()
@@ -463,7 +448,6 @@ local function GetRoleColor(player)
 			end)
 		end
 
-		-- 2. Проверка реального инвентаря (если оружие уже выдали — это точнее всего)
 		local hasKnife, hasGun = false, false
 		local char = player.Character
 		local backpack = player:FindFirstChild("Backpack")
@@ -480,7 +464,6 @@ local function GetRoleColor(player)
 			end
 		end
 
-		-- 3. Приоритет: сначала оружие в руках/рюкзаке, если его еще нет — смотрим кэш ремота
 		if hasKnife then
 			roleName = "Murder"
 		elseif hasGun then
@@ -494,7 +477,6 @@ local function GetRoleColor(player)
 			end
 		end
 
-		-- 4. Если персонаж существует и мертв — сбрасываем на Innocent
 		local hum = char and char:FindFirstChildOfClass("Humanoid")
 		if char and hum and hum.Health <= 0 then
 			roleName = "Innocent"
@@ -1133,7 +1115,6 @@ if HasDrawing then
 						local hum = char:FindFirstChildOfClass("Humanoid")
 						
 						if hum then
-							-- ИСПОЛЬЗУЕМ НАШУ ФУНКЦИЮ СТАТУСА ДЛЯ ЛИНИЙ И БОКСОВ:
 							local pData = RoleCache and RoleCache[player.Name]
 							local status = getPlayerDisplayStatus(pData)
 							local color = status.Color
@@ -2247,7 +2228,7 @@ local function BuildInfoTab()
 	for _, c in ipairs(tab:GetChildren()) do c:Destroy() end
 	local lbl = Instance.new("TextLabel")
 	lbl.Size = UDim2.new(1, -30, 1, -30) lbl.Position = UDim2.new(0, 15, 0, 15) lbl.BackgroundTransparency = 1
-	lbl.Text = "Mmv Script Hub\nPowered by Gemini Ai & ChatGPT\n\nVersion: 5.26.1\n\n- Strict Role Hierarchy (Inventory overrides Remote to prevent double Sheriffs)\n- Auto-refresh Fling Tab & Roles every 5 seconds\n- Fling Pendulum Fix against Speed Glitch\n- Safe Return for Murder Bomb Troll"
+	lbl.Text = "Mmv Script Hub\nPowered by Gemini Ai & ChatGPT\n\nVersion: 5.26.2\n\n- Strict Role Hierarchy (Inventory overrides Remote to prevent double Sheriffs)\n- Auto-refresh Fling Tab & Roles every 5 seconds\n- Fling Pendulum Fix against Speed Glitch\n- Safe Return for Murder Bomb Troll"
 	lbl.TextColor3 = Color3.fromRGB(190, 190, 190) lbl.TextSize = 15 lbl.Font = Enum.Font.GothamBold lbl.TextXAlignment = Enum.TextXAlignment.Left lbl.TextYAlignment = Enum.TextYAlignment.Top lbl.ZIndex = 4 lbl.Parent = tab
 end
 
@@ -2354,7 +2335,7 @@ task.spawn(function()
 			pcall(function()
 				if Config.Fun and Config.Fun.BombTrollActive then
 					local char = LocalPlayer.Character
-					local hrp = char and char:FindFirstChild("HumanoidRootPart")
+					local hrp = char and char:Insert and char:FindFirstChild("HumanoidRootPart")
 					
 					if hrp and (tick() - (Config.Fun.LastBombTrollTick or 0) >= 0.12) then
 						Config.Fun.LastBombTrollTick = tick()
@@ -2396,4 +2377,4 @@ task.spawn(function()
 	ClearAllESP()
 end)
 
-print("[MMV Admin Panel] v5.26.1 успешно загружена!")
+print("[MMV Admin Panel] v5.26.2 успешно загружена!")
