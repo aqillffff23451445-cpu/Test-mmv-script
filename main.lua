@@ -408,32 +408,35 @@ local function GetPlayerPerk(player)
 	return "No Perk"
 end
 
--- Точная функция статуса строго по схеме (если нет данных или мертв -> Dead + серый, иначе роль + свой цвет)
+-- Точная функция статуса строго по твоей схеме
 local function getPlayerDisplayStatus(playerData)
-	if not playerData then
-		return { Text = "Innocent", Color = Config.Colors.Innocent.color }
+	-- Если данных нет или Dead == true -> Серый цвет и статус Dead (мёртв)
+	if not playerData or playerData.Dead == true then
+		return {
+			Text = "Dead",
+			Color = Color3.fromRGB(120, 120, 120) -- Серая подсветка для мертвых
+		}
 	end
 
-	if playerData.Dead == true then
-		return { Text = "Dead", Color = Color3.fromRGB(120, 120, 120) }
-	end
-
+	-- Если Dead == false (игрок жив), определяем цвет по роли из ремота
 	local role = playerData.Role or playerData.Team or "Innocent"
 	local roleLower = tostring(role):lower()
 	
 	if roleLower:find("murder") or roleLower:find("killer") then
-		return { Text = "Murder", Color = Config.Colors.Murder.color }
+		return { Text = "Murder", Color = Config.Colors.Murder.color } -- Красный
 	elseif roleLower:find("sheriff") then
-		return { Text = "Sheriff", Color = Config.Colors.Sheriff.color }
+		return { Text = "Sheriff", Color = Config.Colors.Sheriff.color } -- Синий
 	else
-		return { Text = "Innocent", Color = Config.Colors.Innocent.color }
+		return { Text = "Innocent", Color = Config.Colors.Innocent.color } -- Зелёный
 	end
 end
 
 local function GetRoleColor(player)
 	local roleName = "Innocent"
+	local isDead = false
 
 	pcall(function()
+		-- Обновляем кэш каждые 2 секунды
 		if tick() - LastRoleCheck > 2 then
 			LastRoleCheck = tick()
 			pcall(function()
@@ -443,14 +446,37 @@ local function GetRoleColor(player)
 				if getData then
 					local ok, data = pcall(function() return getData:InvokeServer() end)
 					if ok and type(data) == "table" then
-						RoleCache = data
+						if next(data) == nil then
+							RoleCache = {}
+						else
+							RoleCache = data
+						end
 					end
 				end
 			end)
 		end
 
-		local hasKnife, hasGun = false, false
+		local playerData = RoleCache and RoleCache[player.Name]
+
+		-- 1. Сначала проверяем смерть по серверу
+		if playerData and playerData.Dead == true then
+			isDead = true
+		end
+
+		-- 2. Дополнительная проверка через Humanoid
 		local char = player.Character
+		local hum = char and char:FindFirstChildOfClass("Humanoid")
+		if char and hum and hum.Health <= 0 then
+			isDead = true
+		end
+
+		if isDead then
+			roleName = "Innocent"
+			return
+		end
+
+		-- 3. Проверка инвентаря (реальные предметы)
+		local hasKnife, hasGun = false, false
 		local backpack = player:FindFirstChild("Backpack")
 
 		for _, cont in ipairs({char, backpack}) do
@@ -458,31 +484,35 @@ local function GetRoleColor(player)
 				for _, item in ipairs(cont:GetChildren()) do
 					pcall(function()
 						local nameL = item.Name:lower()
-						if item:FindFirstChild("IsKnife") or nameL:find("knife") then hasKnife = true end
-						if item:FindFirstChild("IsGun") or nameL:find("gun") or nameL:find("revolver") or nameL:find("sheriff") then hasGun = true end
+						if item:FindFirstChild("IsKnife") or nameL:find("knife") then
+							hasKnife = true
+						end
+						if item:FindFirstChild("IsGun") or nameL:find("gun") or nameL:find("revolver") or nameL:find("sheriff") then
+							hasGun = true
+						end
 					end)
 				end
 			end
 		end
 
+		-- 4. Приоритет
 		if hasKnife then
 			roleName = "Murder"
 		elseif hasGun then
 			roleName = "Sheriff"
-		elseif RoleCache and RoleCache[player.Name] then
-			local role = tostring(RoleCache[player.Name].Role or RoleCache[player.Name].Team or ""):lower()
-			if role:find("murder") or role:find("killer") then
+		elseif playerData then
+			local role = tostring(playerData.Role or ""):lower()
+			if role:find("murder") then
 				roleName = "Murder"
 			elseif role:find("sheriff") then
 				roleName = "Sheriff"
 			end
 		end
-
-		local hum = char and char:FindFirstChildOfClass("Humanoid")
-		if char and hum and hum.Health <= 0 then
-			roleName = "Innocent"
-		end
 	end)
+
+	if isDead then
+		return "Dead", Color3.fromRGB(120, 120, 120)
+	end
 
 	return roleName, GetColorFromConfig(roleName)
 end
