@@ -387,8 +387,7 @@ for i, name in ipairs(TabNames) do
 	end)
 end
 
--- ====================== РОЛИ И ЦВЕТА (ТОЧНЫЕ КООРДИНАТЫ ЛОББИ + ИНВЕНТАРЬ) ======================
-local RoleCache = {}
+-- ====================== РОЛИ И ЦВЕТА (ТОЛЬКО ДИСТАНЦИЯ ДО ЛОББИ + ИНВЕНТАРЬ) ======================
 local LastRoleCheck = 0
 
 local function GetColorFromConfig(key)
@@ -398,127 +397,63 @@ local function GetColorFromConfig(key)
 	return conf.color
 end
 
-local function GetPlayerPerk(player)
-	if RoleCache and RoleCache[player.Name] and RoleCache[player.Name].Effect then
-		local effect = tostring(RoleCache[player.Name].Effect)
-		if effect ~= "" and effect ~= "None" then
-			return effect
-		end
-	end
-	return "No Perk"
-end
-
-local function getPlayerDisplayStatus(playerData)
-	if not playerData then
-		return { Text = "Innocent", Color = Config.Colors.Innocent.color }
-	end
-
-	if playerData.Dead == true then
-		return { Text = "Dead", Color = Color3.fromRGB(120, 120, 120) }
-	end
-
-	local role = playerData.Role or playerData.Team or "Innocent"
-	local roleLower = tostring(role):lower()
-	
-	if roleLower:find("murder") or roleLower:find("killer") then
-		return { Text = "Murder", Color = Config.Colors.Murder.color }
-	elseif roleLower:find("sheriff") then
-		return { Text = "Sheriff", Color = Config.Colors.Sheriff.color }
-	else
-		return { Text = "Innocent", Color = Config.Colors.Innocent.color }
-	end
-end
-
--- Жестко заданный центр лобби из твоего F3X (-0.28, 205.25, -12.69)
+-- Точный центр лобби из твоего F3X
 local LOBBY_CENTER = Vector3.new(-0.28, 205.25, -12.69)
 
 local function GetRoleColor(player)
 	local roleName = "Innocent"
-	local isDead = false
+	local isInLobby = false
 
 	pcall(function()
 		local char = player.Character
 		local hrp = char and char:FindFirstChild("HumanoidRootPart")
 		
 		if hrp then
-			-- Проверяем дистанцию до точного центра лобби
+			-- Замеряем расстояние до центра лобби
 			local distToLobby = (hrp.Position - LOBBY_CENTER).Magnitude
 			if distToLobby < 1000 then
-				isDead = true -- Все, кто в лобби ближе 1000 стадов, считаются мертвыми/не в игре
+				isInLobby = true -- Если ближе 1000 стадов — он в лобби, красим в серый
 			end
 		end
 
-		-- Если игрок на карте (далеко от лобби), запрашиваем данные с сервера каждые 2 секунды
-		if not isDead and (tick() - LastRoleCheck > 2) then
-			LastRoleCheck = tick()
-			pcall(function()
-				local remotes = ReplicatedStorage:FindFirstChild("Remotes")
-				local gameplay = remotes and remotes:FindFirstChild("Gameplay")
-				local getData = gameplay and gameplay:FindFirstChild("GetCurrentPlayerData")
-				if getData then
-					local ok, data = pcall(function() return getData:InvokeServer() end)
-					if ok and type(data) == "table" then
-						if next(data) == nil then
-							RoleCache = {}
-						else
-							RoleCache = data
-						end
+		-- Если игрок уже на карте (дальше 1000 стадов), мгновенно проверяем инвентарь
+		if not isInLobby then
+			local hasKnife, hasGun = false, false
+			local backpack = player:FindFirstChild("Backpack")
+
+			for _, cont in ipairs({char, backpack}) do
+				if cont then
+					for _, item in ipairs(cont:GetChildren()) do
+						pcall(function()
+							local nameL = item.Name:lower()
+							if item:FindFirstChild("IsKnife") or nameL:find("knife") then
+								hasKnife = true
+							end
+							if item:FindFirstChild("IsGun") or nameL:find("gun") or nameL:find("revolver") or nameL:find("sheriff") then
+								hasGun = true
+							end
+						end)
 					end
 				end
-			end)
-		end
-
-		if RoleCache and RoleCache[player.Name] and RoleCache[player.Name].Dead == true then
-			isDead = true
-		end
-
-		-- Проверка инвентаря на самой карте
-		local hasKnife, hasGun = false, false
-		local backpack = player:FindFirstChild("Backpack")
-
-		for _, cont in ipairs({char, backpack}) do
-			if cont then
-				for _, item in ipairs(cont:GetChildren()) do
-					pcall(function()
-						local nameL = item.Name:lower()
-						if item:FindFirstChild("IsKnife") or nameL:find("knife") then
-							hasKnife = true
-						end
-						if item:FindFirstChild("IsGun") or nameL:find("gun") or nameL:find("revolver") or nameL:find("sheriff") then
-							hasGun = true
-						end
-					end)
-				end
 			end
-		end
 
-		local hum = char and char:FindFirstChildOfClass("Humanoid")
-		if char and hum and hum.Health <= 0 then
-			isDead = true
-		end
-
-		-- Распределение ролей для боевых функций
-		if isDead then
-			roleName = "Innocent"
-		elseif hasKnife then
-			roleName = "Murder"
-		elseif hasGun then
-			roleName = "Sheriff"
-		elseif RoleCache and RoleCache[player.Name] then
-			local role = tostring(RoleCache[player.Name].Role or RoleCache[player.Name].Team or ""):lower()
-			if role:find("murder") or role:find("killer") then
+			-- Мгновенное определение роли по оружию в руках/рюкзаке
+			if hasKnife then
 				roleName = "Murder"
-			elseif role:find("sheriff") then
+			elseif hasGun then
 				roleName = "Sheriff"
+			else
+				roleName = "Innocent"
 			end
 		end
 	end)
 
-	-- Для ESP и визуала: если в лобби (< 1000 стадов) или мертв -> возвращаем серый цвет
-	if isDead then
+	-- Если игрок в лобби — принудительно возвращаем серый цвет ("Dead")
+	if isInLobby then
 		return "Dead", Color3.fromRGB(120, 120, 120)
 	end
 
+	-- Если на карте — отдаем цвет его роли без задержек
 	return roleName, GetColorFromConfig(roleName)
 end
 
