@@ -2332,10 +2332,10 @@ task.spawn(function()
 			if Config.Combat.BombSpamActive then pcall(TriggerBombSpam) end
 			if Config.AntiCauldron.Enabled then pcall(ProcessCauldrons) end
 			
-			pcall(function()
+					pcall(function()
 				if Config.Fun and Config.Fun.BombTrollActive then
 					local char = LocalPlayer.Character
-					local hrp = char and char:Insert and char:FindFirstChild("HumanoidRootPart")
+					local hrp = char and char:FindFirstChild("HumanoidRootPart")
 					
 					if hrp and (tick() - (Config.Fun.LastBombTrollTick or 0) >= 0.12) then
 						Config.Fun.LastBombTrollTick = tick()
