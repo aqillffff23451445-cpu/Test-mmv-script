@@ -386,10 +386,10 @@ for i, name in ipairs(TabNames) do
 	end)
 end
 
--- ====================== РОЛИ И ЦВЕТА (ЦЕЛЕВАЯ ПРОВЕРКА ПРИ "2 ШЕРИФА") ======================
+-- ====================== РОЛИ И ЦВЕТА (ТОЛЬКО ПО СИГНАЛУ "2 ШЕРИФА" ИЗ GetCurrentPlayerData) ======================
 local RoleCache = {}
-local LastRoleCheck = 0
-local DoubleSheriffScanActive = false
+local LastRemotePoll = 0
+local InventoryCheckEnabled = false
 
 local function GetColorFromConfig(key)
 	local conf = Config.Colors[key]
@@ -414,10 +414,66 @@ local function IsKnifeItem(item)
 		or nameL:find("knife") ~= nil
 end
 
--- Точечная проверка инвентаря только при обнаружении ровно 2 шерифов:
--- приоритет у игрока, у которого пистолет в Character (экипирован) или имеет Handle/Shooting скрипты
-local function InspectTwoSheriffCandidates(sheriffs)
-	local bestCandidate = nil
+-- Поиск RemoteFunction / RemoteEvent GetCurrentPlayerData
+local function FindGetCurrentPlayerDataRemote()
+	local found = nil
+	pcall(function()
+		for _, desc in ipairs(ReplicatedStorage:GetDescendants()) do
+			if (desc:IsA("RemoteFunction") or desc:IsA("RemoteEvent")) and desc.Name == "GetCurrentPlayerData" then
+				found = desc
+				break
+			end
+		end
+	end)
+	return found
+end
+
+local GetCurrentPlayerDataRemote = FindGetCurrentPlayerDataRemote()
+
+-- Нормализация ответа от GetCurrentPlayerData в словарь { [Player] = "Murder" | "Sheriff" | "Innocent" }
+local function ParseRemotePlayerData(rawData)
+	local parsed = {}
+	if type(rawData) ~= "table" then return parsed end
+
+	for key, val in pairs(rawData) do
+		local targetPlayer = nil
+		local rawRole = nil
+
+		if typeof(key) == "Instance" and key:IsA("Player") then
+			targetPlayer = key
+		elseif type(key) == "string" then
+			targetPlayer = Players:FindFirstChild(key)
+		end
+
+		if type(val) == "string" then
+			rawRole = val
+		elseif type(val) == "table" then
+			rawRole = val.Role or val.role or val.PlayerRole or val.Type
+			if not targetPlayer and type(val.Player) == "string" then
+				targetPlayer = Players:FindFirstChild(val.Player)
+			elseif not targetPlayer and typeof(val.Player) == "Instance" and val.Player:IsA("Player") then
+				targetPlayer = val.Player
+			end
+		end
+
+		if targetPlayer and targetPlayer ~= LocalPlayer and type(rawRole) == "string" then
+			local rLow = rawRole:lower()
+			if rLow:find("murd") then
+				parsed[targetPlayer] = "Murder"
+			elseif rLow:find("sher") then
+				parsed[targetPlayer] = "Sheriff"
+			else
+				parsed[targetPlayer] = "Innocent"
+			end
+		end
+	end
+
+	return parsed
+end
+
+-- Точечная проверка инвентаря только для двух кандидатов в шерифы
+local function ResolveTwoSheriffsViaInventory(sheriffs, roleMap)
+	local bestPlayer = nil
 	local bestScore = -1
 
 	for _, candidate in ipairs(sheriffs) do
@@ -429,7 +485,7 @@ local function InspectTwoSheriffCandidates(sheriffs)
 			if char then
 				for _, item in ipairs(char:GetChildren()) do
 					if IsGunItem(item) then
-						score = score + 10 -- держит в руках
+						score = score + 10
 						if item:FindFirstChild("Handle") then score = score + 3 end
 					end
 				end
@@ -446,67 +502,61 @@ local function InspectTwoSheriffCandidates(sheriffs)
 
 		if score > bestScore then
 			bestScore = score
-			bestCandidate = candidate
+			bestPlayer = candidate
 		end
 	end
 
-	return bestCandidate
+	if bestPlayer then
+		for _, candidate in ipairs(sheriffs) do
+			if candidate ~= bestPlayer then
+				roleMap[candidate] = "Innocent"
+			end
+		end
+	end
 end
 
-local function RefreshRolesWithDoubleSheriffCheck()
-	local tempRoles = {}
-	local sheriffs = {}
+local function PollRolesFromRemote()
+	if not GetCurrentPlayerDataRemote or not GetCurrentPlayerDataRemote.Parent then
+		GetCurrentPlayerDataRemote = FindGetCurrentPlayerDataRemote()
+	end
 
+	local nextRoles = {}
 	for _, plr in ipairs(Players:GetPlayers()) do
 		if plr ~= LocalPlayer then
-			local role = "Innocent"
-			pcall(function()
-				local char = plr.Character
-				local backpack = plr:FindFirstChild("Backpack")
-				local hasKnife, hasGun = false, false
+			nextRoles[plr] = RoleCache[plr] or "Innocent"
+		end
+	end
 
-				for _, cont in ipairs({char, backpack}) do
-					if cont then
-						for _, item in ipairs(cont:GetChildren()) do
-							if IsKnifeItem(item) then hasKnife = true end
-							if IsGunItem(item) then hasGun = true end
-						end
-					end
-				end
-
-				if hasKnife then
-					role = "Murder"
-				elseif hasGun then
-					role = "Sheriff"
-				end
-			end)
-
-			tempRoles[plr] = role
-			if role == "Sheriff" then
-				table.insert(sheriffs, plr)
+	if GetCurrentPlayerDataRemote and GetCurrentPlayerDataRemote:IsA("RemoteFunction") then
+		local ok, result = pcall(function()
+			return GetCurrentPlayerDataRemote:InvokeServer()
+		end)
+		if ok and type(result) == "table" then
+			local fromServer = ParseRemotePlayerData(result)
+			for plr, r in pairs(fromServer) do
+				nextRoles[plr] = r
 			end
 		end
 	end
 
-	-- Включаем проверку инвентаря только если обнаружено ровно 2 шерифа, и сразу выключаем после определения
+	-- Считаем шерифов по данным GetCurrentPlayerData
+	local sheriffs = {}
+	for plr, r in pairs(nextRoles) do
+		if plr ~= LocalPlayer and plr.Parent and r == "Sheriff" then
+			table.insert(sheriffs, plr)
+		end
+	end
+
+	-- Включаем проверку инвентаря ТОЛЬКО когда GetCurrentPlayerData отдаёт ровно 2 шерифа, и сразу отключаем
 	if #sheriffs == 2 then
-		DoubleSheriffScanActive = true
-		local realSheriff = InspectTwoSheriffCandidates(sheriffs)
-		if realSheriff then
-			for _, candidate in ipairs(sheriffs) do
-				if candidate ~= realSheriff then
-					tempRoles[candidate] = "Innocent"
-				end
-			end
-		end
-		DoubleSheriffScanActive = false
+		InventoryCheckEnabled = true
+		ResolveTwoSheriffsViaInventory(sheriffs, nextRoles)
+		InventoryCheckEnabled = false
 	else
-		DoubleSheriffScanActive = false
+		InventoryCheckEnabled = false
 	end
 
-	for plr, r in pairs(tempRoles) do
-		RoleCache[plr] = r
-	end
+	RoleCache = nextRoles
 end
 
 local function GetRoleColor(player)
@@ -514,9 +564,9 @@ local function GetRoleColor(player)
 		return "Innocent", GetColorFromConfig("Innocent")
 	end
 
-	if tick() - LastRoleCheck > 0.25 then
-		LastRoleCheck = tick()
-		pcall(RefreshRolesWithDoubleSheriffCheck)
+	if tick() - LastRemotePoll > 0.35 then
+		LastRemotePoll = tick()
+		pcall(PollRolesFromRemote)
 	end
 
 	local roleName = RoleCache[player] or "Innocent"
