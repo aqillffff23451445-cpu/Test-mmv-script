@@ -1,7 +1,7 @@
 --приветик бро! Этот код без вирусов и полностью бесплатный! Пользуйся на здоровье<3
 -- ==============================================================================
 -- MMV Admin Panel | Gemini Ai Integration
--- Version 5.26.3 (Strict Schema Status Fix)
+-- Version 5.26.0 (Strict Inventory/Remote Role Hierarchy + Auto 5s Refresh)
 -- ==============================================================================
 
 local getgenv = getgenv or function() return _G end
@@ -33,7 +33,6 @@ local Config = {
 		Chams = false,
 		Name = false,
 		Role = false,
-		Perk = false,
 		Line = false,
 		Box = false,
 		Gun = false,
@@ -387,8 +386,10 @@ for i, name in ipairs(TabNames) do
 	end)
 end
 
--- ====================== РОЛИ И ЦВЕТА (ТОЛЬКО ДИСТАНЦИЯ ДО ЛОББИ + ИНВЕНТАРЬ) ======================
+-- ====================== РОЛИ И ЦВЕТА (ЦЕЛЕВАЯ ПРОВЕРКА ПРИ "2 ШЕРИФА") ======================
+local RoleCache = {}
 local LastRoleCheck = 0
+local DoubleSheriffScanActive = false
 
 local function GetColorFromConfig(key)
 	local conf = Config.Colors[key]
@@ -397,83 +398,154 @@ local function GetColorFromConfig(key)
 	return conf.color
 end
 
--- Точный центр лобби из твоего F3X
-local LOBBY_CENTER = Vector3.new(-0.28, 205.25, -12.69)
+local function IsGunItem(item)
+	if not item then return false end
+	local nameL = item.Name:lower()
+	return item:FindFirstChild("IsGun") ~= nil
+		or nameL:find("gun") ~= nil
+		or nameL:find("revolver") ~= nil
+		or nameL:find("sheriff") ~= nil
+end
 
-local function GetRoleColor(player)
-	local roleName = "Innocent"
-	local isInLobby = false
+local function IsKnifeItem(item)
+	if not item then return false end
+	local nameL = item.Name:lower()
+	return item:FindFirstChild("IsKnife") ~= nil
+		or nameL:find("knife") ~= nil
+end
 
-	pcall(function()
-		local char = player.Character
-		local hrp = char and char:FindFirstChild("HumanoidRootPart")
-		
-		if hrp then
-			-- Замеряем расстояние до центра лобби
-			local distToLobby = (hrp.Position - LOBBY_CENTER).Magnitude
-			if distToLobby < 1000 then
-				isInLobby = true -- Если ближе 1000 стадов — он в лобби, красим в серый
-			end
-		end
+-- Точечная проверка инвентаря только при обнаружении ровно 2 шерифов:
+-- приоритет у игрока, у которого пистолет в Character (экипирован) или имеет Handle/Shooting скрипты
+local function InspectTwoSheriffCandidates(sheriffs)
+	local bestCandidate = nil
+	local bestScore = -1
 
-		-- Если игрок уже на карте (дальше 1000 стадов), мгновенно проверяем инвентарь
-		if not isInLobby then
-			local hasKnife, hasGun = false, false
-			local backpack = player:FindFirstChild("Backpack")
+	for _, candidate in ipairs(sheriffs) do
+		local score = 0
+		pcall(function()
+			local char = candidate.Character
+			local backpack = candidate:FindFirstChild("Backpack")
 
-			for _, cont in ipairs({char, backpack}) do
-				if cont then
-					for _, item in ipairs(cont:GetChildren()) do
-						pcall(function()
-							local nameL = item.Name:lower()
-							if item:FindFirstChild("IsKnife") or nameL:find("knife") then
-								hasKnife = true
-							end
-							if item:FindFirstChild("IsGun") or nameL:find("gun") or nameL:find("revolver") or nameL:find("sheriff") then
-								hasGun = true
-							end
-						end)
+			if char then
+				for _, item in ipairs(char:GetChildren()) do
+					if IsGunItem(item) then
+						score = score + 10 -- держит в руках
+						if item:FindFirstChild("Handle") then score = score + 3 end
 					end
 				end
 			end
 
-			-- Мгновенное определение роли по оружию в руках/рюкзаке
-			if hasKnife then
-				roleName = "Murder"
-			elseif hasGun then
-				roleName = "Sheriff"
-			else
-				roleName = "Innocent"
+			if backpack then
+				for _, item in ipairs(backpack:GetChildren()) do
+					if IsGunItem(item) then
+						score = score + 4
+					end
+				end
 			end
-		end
-	end)
+		end)
 
-	-- Если игрок в лобби — принудительно возвращаем серый цвет ("Dead")
-	if isInLobby then
-		return "Dead", Color3.fromRGB(120, 120, 120)
+		if score > bestScore then
+			bestScore = score
+			bestCandidate = candidate
+		end
 	end
 
-	-- Если на карте — отдаем цвет его роли без задержек
+	return bestCandidate
+end
+
+local function RefreshRolesWithDoubleSheriffCheck()
+	local tempRoles = {}
+	local sheriffs = {}
+
+	for _, plr in ipairs(Players:GetPlayers()) do
+		if plr ~= LocalPlayer then
+			local role = "Innocent"
+			pcall(function()
+				local char = plr.Character
+				local backpack = plr:FindFirstChild("Backpack")
+				local hasKnife, hasGun = false, false
+
+				for _, cont in ipairs({char, backpack}) do
+					if cont then
+						for _, item in ipairs(cont:GetChildren()) do
+							if IsKnifeItem(item) then hasKnife = true end
+							if IsGunItem(item) then hasGun = true end
+						end
+					end
+				end
+
+				if hasKnife then
+					role = "Murder"
+				elseif hasGun then
+					role = "Sheriff"
+				end
+			end)
+
+			tempRoles[plr] = role
+			if role == "Sheriff" then
+				table.insert(sheriffs, plr)
+			end
+		end
+	end
+
+	-- Включаем проверку инвентаря только если обнаружено ровно 2 шерифа, и сразу выключаем после определения
+	if #sheriffs == 2 then
+		DoubleSheriffScanActive = true
+		local realSheriff = InspectTwoSheriffCandidates(sheriffs)
+		if realSheriff then
+			for _, candidate in ipairs(sheriffs) do
+				if candidate ~= realSheriff then
+					tempRoles[candidate] = "Innocent"
+				end
+			end
+		end
+		DoubleSheriffScanActive = false
+	else
+		DoubleSheriffScanActive = false
+	end
+
+	for plr, r in pairs(tempRoles) do
+		RoleCache[plr] = r
+	end
+end
+
+local function GetRoleColor(player)
+	if not player or player == LocalPlayer then
+		return "Innocent", GetColorFromConfig("Innocent")
+	end
+
+	if tick() - LastRoleCheck > 0.25 then
+		LastRoleCheck = tick()
+		pcall(RefreshRolesWithDoubleSheriffCheck)
+	end
+
+	local roleName = RoleCache[player] or "Innocent"
 	return roleName, GetColorFromConfig(roleName)
 end
 
 local function HasGun()
-	local char = LocalPlayer.Character
-	local backpack = LocalPlayer:FindFirstChild("Backpack")
-	for _, cont in ipairs({char, backpack}) do
-		if cont then
-			for _, item in ipairs(cont:GetChildren()) do
-				local nameL = item.Name:lower()
-				if item:FindFirstChild("IsGun") or nameL:find("gun") or nameL:find("revolver") or nameL:find("sheriff") then
-					return true, item
+	local foundTool = nil
+	pcall(function()
+		local char = LocalPlayer.Character
+		local backpack = LocalPlayer:FindFirstChild("Backpack")
+		for _, cont in ipairs({char, backpack}) do
+			if cont then
+				for _, item in ipairs(cont:GetChildren()) do
+					if IsGunItem(item) then
+						foundTool = item
+						break
+					end
 				end
 			end
+			if foundTool then break end
 		end
-	end
-	return false, nil
+	end)
+	return foundTool ~= nil, foundTool
 end
 
-_G.GetPlayerRole = GetRoleColor
+Players.PlayerRemoving:Connect(function(plr)
+	RoleCache[plr] = nil
+end)
 
 -- ====================== AUDIO / RADIO ======================
 local function PlaySelectedSong(songId)
@@ -889,14 +961,12 @@ local function UpdateESP()
 				local root = char:FindFirstChild("HumanoidRootPart")
 				local head = char:FindFirstChild("Head") or root
 				local hum = char:FindFirstChildOfClass("Humanoid")
+
 				if root and hum and hum.Health > 0 then
 					ProcessHubUserTag(player, head)
 
 					if Config.ESP.Enabled then
-						local pData = RoleCache and RoleCache[player.Name]
-						local status = getPlayerDisplayStatus(pData)
-						local color = status.Color
-
+						local roleName, color = GetRoleColor(player)
 						if Config.ESP.Chams then
 							local hl = Highlights[player]
 							if not hl or not hl.Parent or hl.Parent ~= char then
@@ -908,18 +978,16 @@ local function UpdateESP()
 								Highlights[player] = hl
 							end
 							hl.Adornee = char hl.FillColor = color hl.Enabled = true
-						elseif Highlights[player] then 
-							Highlights[player].Enabled = false 
-						end
+						elseif Highlights[player] then Highlights[player].Enabled = false end
 
-						if Config.ESP.Name or Config.ESP.Role or Config.ESP.Perk then
+						if Config.ESP.Name or Config.ESP.Role then
 							local bb = Billboards[player]
 							if not bb or not bb.Parent or bb.Parent ~= char then
 								if bb then pcall(function() bb:Destroy() end) end
 								bb = Instance.new("BillboardGui")
 								bb.Name = "MMV_ESP_Billboard"
-								bb.Size = UDim2.new(0, 160, 0, 56)
-								bb.StudsOffset = Vector3.new(0, 3.2, 0)
+								bb.Size = UDim2.new(0, 150, 0, 42)
+								bb.StudsOffset = Vector3.new(0, 2.9, 0)
 								bb.AlwaysOnTop = true
 								bb.Adornee = head
 								local lbl = Instance.new("TextLabel")
@@ -933,27 +1001,11 @@ local function UpdateESP()
 								bb.Parent = char
 								Billboards[player] = bb
 							end
-
-							local linesList = {}
-							if Config.ESP.Name then
-								table.insert(linesList, player.Name)
-							end
-							if Config.ESP.Perk then
-								table.insert(linesList, "[" .. GetPlayerPerk(player) .. "]")
-							end
-							if Config.ESP.Role then
-								table.insert(linesList, status.Text)
-							end
-
+							local text = (Config.ESP.Name and Config.ESP.Role) and (player.Name .. "\n" .. roleName) or (Config.ESP.Name and player.Name or roleName)
 							bb.Enabled = true
 							local lbl = bb:FindFirstChild("Label")
-							if lbl then
-								lbl.Text = table.concat(linesList, "\n")
-								lbl.TextColor3 = status.Color
-							end
-						elseif Billboards[player] then
-							Billboards[player].Enabled = false
-						end
+							if lbl then lbl.Text = text lbl.TextColor3 = color end
+						elseif Billboards[player] then Billboards[player].Enabled = false end
 					else
 						if Highlights[player] then Highlights[player].Enabled = false end
 						if Billboards[player] then Billboards[player].Enabled = false end
@@ -1085,11 +1137,8 @@ if HasDrawing then
 						local root = char.HumanoidRootPart 
 						local hum = char:FindFirstChildOfClass("Humanoid")
 						
-						if hum then
-							local pData = RoleCache and RoleCache[player.Name]
-							local status = getPlayerDisplayStatus(pData)
-							local color = status.Color
-							
+						if hum and hum.Health > 0 then
+							local _, color = GetRoleColor(player)
 							local rootPos, onScreen = Camera:WorldToViewportPoint(root.Position)
 							
 							if onScreen and rootPos.Z > 0 then
@@ -1540,17 +1589,6 @@ CreateActionScreenButton("BombSpamBtn", "BOMB SPAM", UDim2.new(1, -175, 0, 332),
 	SaveConfig()
 end)
 
--- ====================== ИНИЦИАЛИЗАЦИЯ ВСЕХ ВКЛАДОК ======================
-pcall(BuildPlayerTab)
-pcall(BuildFlingTab)
-pcall(BuildVisualTab)
-pcall(BuildCombatTab)
-pcall(BuildFunTab)
-pcall(BuildInfoTab)
-
-Players.PlayerAdded:Connect(function() pcall(BuildFlingTab) end)
-Players.PlayerRemoving:Connect(function() pcall(BuildFlingTab) end)
-
 -- ====================== FLING (МАЯТНИК ПРОТИВ СПИД-ГЛИТЧЕРЕЙ) ======================
 local SelectedTargets = {}
 local function StartFling()
@@ -1560,7 +1598,7 @@ local function StartFling()
 	for _, plr in pairs(SelectedTargets) do
 		if plr and plr.Character and plr.Character:FindFirstChild("HumanoidRootPart") then
 			targetPlayer = plr
-            break
+			break
 		end
 	end
 	if not targetPlayer then return end
@@ -1791,44 +1829,21 @@ local function BuildFlingTab()
 
 	for _, data in ipairs(sortedPlayers) do
 		local player = data.player
-		
-		local pData = RoleCache and RoleCache[player.Name]
-		local status = getPlayerDisplayStatus(pData)
-
 		local btn = Instance.new("TextButton")
-		btn.Name = player.Name 
-		btn.Size = UDim2.new(1, -20, 0, 34) 
-		btn.Position = UDim2.new(0, 10, 0, y)
+		btn.Name = player.Name btn.Size = UDim2.new(1, -20, 0, 34) btn.Position = UDim2.new(0, 10, 0, y)
 		btn.BackgroundColor3 = SelectedTargets[player] and Color3.fromRGB(30, 70, 45) or Color3.fromRGB(52, 52, 52)
-		
-		btn.Text = "  " .. player.Name .. " [" .. status.Text .. "]" 
-		btn.TextColor3 = status.Color 
-		btn.TextSize = 14 
-		btn.Font = Enum.Font.GothamBold 
-		btn.TextXAlignment = Enum.TextXAlignment.Left 
-		btn.ZIndex = 4 
-		btn.Parent = tab
-		
+		btn.Text = "  " .. player.Name .. " [" .. data.role .. "]" 
+		btn.TextColor3 = data.color 
+		btn.TextSize = 14 btn.Font = Enum.Font.GothamBold btn.TextXAlignment = Enum.TextXAlignment.Left btn.ZIndex = 4 btn.Parent = tab
 		Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 6)
 
 		local sel = Instance.new("TextLabel")
-		sel.Size = UDim2.new(0, 90, 1, 0) 
-		sel.Position = UDim2.new(1, -95, 0, 0) 
-		sel.BackgroundTransparency = 1
-		sel.Text = SelectedTargets[player] and "SELECT" or "" 
-		sel.TextColor3 = Color3.fromRGB(0, 255, 120)
-		sel.TextSize = 14 
-		sel.Font = Enum.Font.GothamBold 
-		sel.TextXAlignment = Enum.TextXAlignment.Right 
-		sel.ZIndex = 5 
-		sel.Parent = btn
+		sel.Size = UDim2.new(0, 90, 1, 0) sel.Position = UDim2.new(1, -95, 0, 0) sel.BackgroundTransparency = 1
+		sel.Text = SelectedTargets[player] and "SELECT" or "" sel.TextColor3 = Color3.fromRGB(0, 255, 120)
+		sel.TextSize = 14 sel.Font = Enum.Font.GothamBold sel.TextXAlignment = Enum.TextXAlignment.Right sel.ZIndex = 5 sel.Parent = btn
 
 		btn.MouseButton1Click:Connect(function()
-			if SelectedTargets[player] then 
-				SelectedTargets = {} 
-			else 
-				SelectedTargets = {[player] = player} 
-			end
+			if SelectedTargets[player] then SelectedTargets = {} else SelectedTargets = {[player] = player} end
 			BuildFlingTab()
 		end)
 		y = y + 40
@@ -1907,7 +1922,7 @@ local function BuildVisualTab()
 	y = y + 44
 
 	section("---Esp")
-	local opts = {{n = "Chams esp", k = "Chams"}, {n = "Name esp", k = "Name"}, {n = "Role esp", k = "Role"}, {n = "Perk esp", k = "Perk"}, {n = "Line esp", k = "Line"}, {n = "Box esp", k = "Box"}, {n = "Gun esp", k = "Gun"}, {n = "Trap esp", k = "Trap"}}
+	local opts = {{n = "Chams esp", k = "Chams"}, {n = "Name esp", k = "Name"}, {n = "Role esp", k = "Role"}, {n = "Line esp", k = "Line"}, {n = "Box esp", k = "Box"}, {n = "Gun esp", k = "Gun"}, {n = "Trap esp", k = "Trap"}}
 	for _, o in ipairs(opts) do
 		local btn = Instance.new("TextButton")
 		btn.Size = UDim2.new(1, -20, 0, 34) btn.Position = UDim2.new(0, 10, 0, y)
@@ -2066,7 +2081,7 @@ local function BuildCombatTab()
 		y = y + 40
 	end
 
-    uiButtonToggle("Stealth button", "StealthBtn")
+	uiButtonToggle("Stealth button", "StealthBtn")
 	uiButtonToggle("Pick up gun", "PickUpGunBtn")
 	uiButtonToggle("Shot murder", "ShotMurderBtn")
 	uiButtonToggle("Kill murder", "KillMurderBtn")
@@ -2199,7 +2214,7 @@ local function BuildInfoTab()
 	for _, c in ipairs(tab:GetChildren()) do c:Destroy() end
 	local lbl = Instance.new("TextLabel")
 	lbl.Size = UDim2.new(1, -30, 1, -30) lbl.Position = UDim2.new(0, 15, 0, 15) lbl.BackgroundTransparency = 1
-	lbl.Text = "Mmv Script Hub\nPowered by Gemini Ai & ChatGPT\n\nVersion: 5.26.3\n\n- Strict Role Hierarchy (Inventory overrides Remote to prevent double Sheriffs)\n- Auto-refresh Fling Tab & Roles every 5 seconds\n- Fling Pendulum Fix against Speed Glitch\n- Safe Return for Murder Bomb Troll"
+	lbl.Text = "Mmv Script Hub\nPowered by Gemini Ai & ChatGPT\n\nVersion: 5.26.0\n\n- Auto-resolves '2 Sheriffs' via targeted inventory check and disables scan after\n- Auto-refresh Fling Tab every 5 seconds\n- Fling Pendulum Fix against Speed Glitch\n- Safe Return for Murder Bomb Troll"
 	lbl.TextColor3 = Color3.fromRGB(190, 190, 190) lbl.TextSize = 15 lbl.Font = Enum.Font.GothamBold lbl.TextXAlignment = Enum.TextXAlignment.Left lbl.TextYAlignment = Enum.TextYAlignment.Top lbl.ZIndex = 4 lbl.Parent = tab
 end
 
@@ -2348,4 +2363,4 @@ task.spawn(function()
 	ClearAllESP()
 end)
 
-print("[MMV Admin Panel] v5.26.3 успешно загружена!")
+print("[MMV Admin Panel] v5.26.0 успешно загружена!")
